@@ -8,8 +8,8 @@ data class DeviceSubscriptionInfo(
     val slotIndex: Int,
     val subscriptionId: Int,
 ) {
-    val displayTitle: String
-        get() = carrierName.ifBlank {
-            if (isEmbedded) "本机 eSIM" else "本机 SIM"
+    fun displayTitle(defaultEsimTitle: String, defaultSimTitle: String): String =
+        carrierName.ifBlank {
+            if (isEmbedded) defaultEsimTitle else defaultSimTitle
         }
 }

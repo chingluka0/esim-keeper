@@ -11,6 +11,7 @@ eSIM Keeper is a free, offline-first Android app for tracking eSIM renewal dates
 - Filter cards by all, expiring soon, expired, or long-term renewal.
 - Read local SIM/eSIM information when the user grants phone permissions.
 - Add renewal reminders to the system calendar without requesting calendar read/write permissions.
+- English and Chinese UI resources.
 - Works offline and does not request network access.
 
 ## Privacy

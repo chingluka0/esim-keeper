@@ -7,6 +7,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.baohao.esimkeeper.R
 import com.baohao.esimkeeper.data.AppDatabase
 import com.baohao.esimkeeper.data.CountryOption
 import com.baohao.esimkeeper.data.ESimCard
@@ -23,6 +24,7 @@ data class CardEditorInput(
     val name: String,
     val phoneNumber: String,
     val country: CountryOption,
+    val countryName: String,
     val balanceText: String,
     val startDate: LocalDate,
     val cycleDays: Int?,
@@ -82,15 +84,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun saveCard(input: CardEditorInput) {
         val existing = editorTarget
         val now = Instant.now()
-        val displayName = input.name.trim().ifBlank { "${input.country.countryName} eSIM" }
+        val displayName = input.name.trim().ifBlank {
+            getApplication<Application>().getString(R.string.default_esim_name, input.countryName)
+        }
         val card = ESimCard(
             id = existing?.id ?: 0,
             name = displayName,
             phoneNumber = input.phoneNumber.trim(),
-            countryName = input.country.countryName,
+            countryName = input.countryName,
             countryCode = input.country.countryCode,
             flagEmoji = input.country.flagEmoji,
-            balanceText = input.balanceText.trim().ifBlank { "未填写" },
+            balanceText = input.balanceText.trim().ifBlank {
+                getApplication<Application>().getString(R.string.value_not_set)
+            },
             startDate = input.startDate,
             cycleDays = input.cycleDays,
             expiryDate = input.expiryDate,

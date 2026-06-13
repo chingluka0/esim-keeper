@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.provider.CalendarContract
 import android.widget.Toast
+import androidx.annotation.StringRes
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -82,6 +83,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -92,6 +94,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.baohao.esimkeeper.R
 import com.baohao.esimkeeper.data.Countries
 import com.baohao.esimkeeper.data.CountryOption
 import com.baohao.esimkeeper.data.DeviceSubscriptionInfo
@@ -105,16 +108,24 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 import kotlin.math.absoluteValue
 
-private val dateFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy年M月d日")
-
-private enum class CardFilter(val label: String) {
-    All("全部"),
-    Warning("即将到期"),
-    Expired("已过期"),
-    LongTerm("长期保号"),
+private enum class CardFilter(@StringRes val labelRes: Int) {
+    All(R.string.filter_all),
+    Warning(R.string.filter_warning),
+    Expired(R.string.filter_expired),
+    LongTerm(R.string.filter_long_term),
 }
+
+private fun Context.preferredLocale(): Locale =
+    resources.configuration.locales[0] ?: Locale.getDefault()
+
+private fun Context.isChineseLanguage(): Boolean =
+    preferredLocale().language == Locale.CHINESE.language
+
+private fun LocalDate.formatForLocale(context: Context): String =
+    format(DateTimeFormatter.ofPattern(context.getString(R.string.date_pattern), context.preferredLocale()))
 
 @Composable
 fun ESimKeeperApp(viewModel: MainViewModel) {
@@ -162,7 +173,7 @@ fun ESimKeeperApp(viewModel: MainViewModel) {
                 containerColor = KeeperBlue,
                 contentColor = Color.White,
                 icon = { Icon(Icons.Default.Add, contentDescription = null) },
-                text = { Text("添加") },
+                text = { Text(stringResource(R.string.add)) },
             )
         },
     ) { padding ->
@@ -192,7 +203,11 @@ fun ESimKeeperApp(viewModel: MainViewModel) {
             Spacer(modifier = Modifier.height(8.dp))
             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Spacer(modifier = Modifier.weight(1f))
-                Text("${filteredCards.size} 张卡片", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 14.sp)
+                Text(
+                    text = stringResource(R.string.card_count, filteredCards.size),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 14.sp,
+                )
             }
             Spacer(modifier = Modifier.height(12.dp))
 
@@ -248,13 +263,17 @@ private fun HomeHeader(
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = "eSIM 保号管家",
+                text = stringResource(R.string.app_name),
                 fontSize = 30.sp,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onBackground,
             )
             Text(
-                text = if (cardCount == 0) "离线记录你的 eSIM 保号时间" else "已记录 $cardCount 张 eSIM",
+                text = if (cardCount == 0) {
+                    stringResource(R.string.app_subtitle_empty)
+                } else {
+                    stringResource(R.string.app_subtitle_count, cardCount)
+                },
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 14.sp,
             )
@@ -314,7 +333,7 @@ private fun FilterBar(
                 onClick = { onFilterSelected(filter) },
                 label = {
                     Text(
-                        text = filter.label,
+                        text = stringResource(filter.labelRes),
                         maxLines = 1,
                         fontSize = 13.sp,
                     )
@@ -334,7 +353,7 @@ private fun SearchField(value: String, onValueChange: (String) -> Unit) {
         leadingIcon = {
             Icon(Icons.Default.Search, contentDescription = null, tint = KeeperMuted)
         },
-        placeholder = { Text("搜索运营商、国家或号码") },
+        placeholder = { Text(stringResource(R.string.search_placeholder)) },
         shape = RoundedCornerShape(18.dp),
         colors = TextFieldDefaults.colors(
             focusedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f),
@@ -365,13 +384,21 @@ private fun EmptyState(hasCards: Boolean, modifier: Modifier = Modifier) {
             }
             Spacer(modifier = Modifier.height(18.dp))
             Text(
-                text = if (hasCards) "没有找到匹配的卡片" else "还没有 eSIM 卡片",
+                text = if (hasCards) {
+                    stringResource(R.string.empty_filtered_title)
+                } else {
+                    stringResource(R.string.empty_title)
+                },
                 fontWeight = FontWeight.SemiBold,
                 fontSize = 18.sp,
             )
             Spacer(modifier = Modifier.height(6.dp))
             Text(
-                text = if (hasCards) "换个关键词试试" else "点击右下角加号开始记录",
+                text = if (hasCards) {
+                    stringResource(R.string.empty_filtered_subtitle)
+                } else {
+                    stringResource(R.string.empty_subtitle)
+                },
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 14.sp,
             )
@@ -402,13 +429,13 @@ private fun DonationDialog(onDismiss: () -> Unit) {
                     modifier = Modifier.size(34.dp),
                 )
                 Text(
-                    text = "感谢您的 Token",
+                    text = stringResource(R.string.donation_title),
                     fontSize = 22.sp,
                     fontWeight = FontWeight.Bold,
                     textAlign = TextAlign.Center,
                 )
                 Text(
-                    text = "软件免费使用。如果它帮你省心，可以自愿付给我一点点，就当是 token 了。",
+                    text = stringResource(R.string.donation_body),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 14.sp,
                     textAlign = TextAlign.Center,
@@ -433,7 +460,7 @@ private fun DonationDialog(onDismiss: () -> Unit) {
                             )
                         } else {
                             Text(
-                                text = "将收款码图片放到\napp/src/main/res/drawable/donation_qr.jpg",
+                                text = stringResource(R.string.donation_missing_qr),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 13.sp,
                                 textAlign = TextAlign.Center,
@@ -442,13 +469,13 @@ private fun DonationDialog(onDismiss: () -> Unit) {
                     }
                 }
                 Text(
-                    text = "灵感来自 SIMHUB。本应用为独立作品，非官方、无隶属关系。",
+                    text = stringResource(R.string.donation_disclaimer),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 12.sp,
                     textAlign = TextAlign.Center,
                 )
                 TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.End)) {
-                    Text("关闭")
+                    Text(stringResource(R.string.close))
                 }
             }
         }
@@ -503,7 +530,7 @@ private fun ESimCardItem(
                                     color = KeeperBlue.copy(alpha = 0.14f),
                                 ) {
                                     Text(
-                                        text = "长期保号",
+                                        text = stringResource(R.string.long_term_badge),
                                         color = KeeperBlue,
                                         fontSize = 12.sp,
                                         fontWeight = FontWeight.SemiBold,
@@ -522,7 +549,7 @@ private fun ESimCardItem(
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "${card.expiryDate.format(dateFormatter)} · ${remainingText(status)}",
+                                text = "${card.expiryDate.formatForLocale(context)} · ${remainingText(context, status)}",
                                 color = stateColor,
                                 fontSize = 14.sp,
                                 maxLines = 1,
@@ -588,7 +615,7 @@ private fun ESimCardItem(
                                 modifier = Modifier.size(17.dp),
                             )
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("已保号/续期")
+                            Text(stringResource(R.string.renew_action))
                         }
                     }
                 }
@@ -603,7 +630,11 @@ private fun ESimCardItem(
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = if (days == 0) "到期当天提醒" else "提前 $days 天提醒",
+                            text = if (days == 0) {
+                                stringResource(R.string.reminder_today)
+                            } else {
+                                stringResource(R.string.reminder_days_before, days)
+                            },
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontSize = 12.sp,
                         )
@@ -617,7 +648,7 @@ private fun ESimCardItem(
             onDismissRequest = { menuExpanded = false },
         ) {
             DropdownMenuItem(
-                text = { Text("编辑") },
+                text = { Text(stringResource(R.string.menu_edit)) },
                 leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
                 onClick = {
                     menuExpanded = false
@@ -625,7 +656,7 @@ private fun ESimCardItem(
                 },
             )
             DropdownMenuItem(
-                text = { Text("复制手机号") },
+                text = { Text(stringResource(R.string.menu_copy_phone)) },
                 leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null) },
                 onClick = {
                     clipboard.setText(AnnotatedString(card.phoneNumber))
@@ -633,7 +664,7 @@ private fun ESimCardItem(
                 },
             )
             DropdownMenuItem(
-                text = { Text("加入系统日历") },
+                text = { Text(stringResource(R.string.menu_add_calendar)) },
                 leadingIcon = { Icon(Icons.Default.CalendarMonth, contentDescription = null) },
                 onClick = {
                     menuExpanded = false
@@ -642,7 +673,7 @@ private fun ESimCardItem(
             )
             HorizontalDivider()
             DropdownMenuItem(
-                text = { Text("删除", color = KeeperRed) },
+                text = { Text(stringResource(R.string.menu_delete), color = KeeperRed) },
                 leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = KeeperRed) },
                 onClick = {
                     menuExpanded = false
@@ -653,11 +684,11 @@ private fun ESimCardItem(
     }
 }
 
-private fun remainingText(status: ExpiryStatus): String {
+private fun remainingText(context: Context, status: ExpiryStatus): String {
     return when {
-        status.isExpired -> "已过期 ${status.remainingDays.absoluteValue} 天"
-        status.remainingDays == 0L -> "今天到期"
-        else -> "${status.remainingDays} 天后到期"
+        status.isExpired -> context.getString(R.string.remaining_expired, status.remainingDays.absoluteValue)
+        status.remainingDays == 0L -> context.getString(R.string.remaining_today)
+        else -> context.getString(R.string.remaining_days, status.remainingDays)
     }
 }
 
@@ -673,17 +704,17 @@ private fun addCardToCalendar(context: Context, card: ESimCard) {
         .toInstant()
         .toEpochMilli()
     val description = buildString {
-        appendLine("号码：${card.phoneNumber}")
-        appendLine("地区：${card.countryName} · ${card.countryCode}")
-        appendLine("余额：${card.balanceText}")
-        card.cycleDays?.let { appendLine("保号周期：$it 天") }
-        append("来自 eSIM 保号管家")
+        appendLine(context.getString(R.string.calendar_desc_phone, card.phoneNumber))
+        appendLine(context.getString(R.string.calendar_desc_country, card.countryName, card.countryCode))
+        appendLine(context.getString(R.string.calendar_desc_balance, card.balanceText))
+        card.cycleDays?.let { appendLine(context.getString(R.string.calendar_desc_cycle, it)) }
+        append(context.getString(R.string.calendar_desc_source))
     }
     val intent = Intent(Intent.ACTION_INSERT)
         .setData(CalendarContract.Events.CONTENT_URI)
         .putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, beginMillis)
         .putExtra(CalendarContract.EXTRA_EVENT_END_TIME, endMillis)
-        .putExtra(CalendarContract.Events.TITLE, "eSIM 保号提醒：${card.name}")
+        .putExtra(CalendarContract.Events.TITLE, context.getString(R.string.calendar_title, card.name))
         .putExtra(CalendarContract.Events.DESCRIPTION, description)
         .putExtra(CalendarContract.Events.AVAILABILITY, CalendarContract.Events.AVAILABILITY_BUSY)
 
@@ -695,7 +726,7 @@ private fun addCardToCalendar(context: Context, card: ESimCard) {
 
     runCatching { context.startActivity(intent) }
         .onFailure {
-            Toast.makeText(context, "没有找到可用的日历应用", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, context.getString(R.string.calendar_app_missing), Toast.LENGTH_SHORT).show()
         }
 }
 
@@ -707,14 +738,25 @@ private fun ESimEditorDialog(
     onSave: (CardEditorInput) -> Unit,
 ) {
     val context = LocalContext.current
+    val useChinese = context.isChineseLanguage()
+    val valueNotSet = stringResource(R.string.value_not_set)
     val today = remember { LocalDate.now() }
     var name by remember(card?.id) { mutableStateOf(card?.name.orEmpty()) }
     var phone by remember(card?.id) { mutableStateOf(card?.phoneNumber.orEmpty()) }
-    var balance by remember(card?.id) { mutableStateOf(card?.balanceText?.takeUnless { it == "未填写" }.orEmpty()) }
+    var balance by remember(card?.id, valueNotSet) {
+        mutableStateOf(card?.balanceText?.takeUnless { it == valueNotSet || it == "未填写" }.orEmpty())
+    }
     var selectedCountry by remember(card?.id) {
         mutableStateOf(
             card?.let {
-                CountryOption(it.countryName, it.countryCode, "", it.flagEmoji)
+                val template = Countries.findByIso(it.countryCode)
+                template?.copy(countryName = it.countryName) ?: CountryOption(
+                    countryName = it.countryName,
+                    englishName = it.countryName,
+                    countryCode = it.countryCode,
+                    dialCode = "",
+                    flagEmoji = it.flagEmoji,
+                )
             } ?: Countries.common.first(),
         )
     }
@@ -735,22 +777,26 @@ private fun ESimEditorDialog(
     var showSubscriptionPicker by remember { mutableStateOf(false) }
 
     fun applyDeviceSubscription(info: DeviceSubscriptionInfo) {
-        name = info.displayTitle
+        val title = info.displayTitle(
+            defaultEsimTitle = context.getString(R.string.device_esim),
+            defaultSimTitle = context.getString(R.string.device_sim),
+        )
+        name = title
         if (info.phoneNumber.isNotBlank()) {
             phone = info.phoneNumber
         }
         Countries.findByIso(info.countryIso)?.let { selectedCountry = it }
         importMessage = if (info.phoneNumber.isBlank()) {
-            "已读取 ${info.displayTitle}，但系统未公开手机号，请手动填写。"
+            context.getString(R.string.import_read_with_missing_phone, title)
         } else {
-            "已读取 ${info.displayTitle}。"
+            context.getString(R.string.import_read_success, title)
         }
     }
 
     fun handleDeviceSubscriptions(infos: List<DeviceSubscriptionInfo>) {
         deviceSubscriptions = infos
         when {
-            infos.isEmpty() -> importMessage = "没有读取到可用的 SIM/eSIM 信息。"
+            infos.isEmpty() -> importMessage = context.getString(R.string.import_empty)
             infos.size == 1 -> applyDeviceSubscription(infos.first())
             else -> showSubscriptionPicker = true
         }
@@ -763,7 +809,7 @@ private fun ESimEditorDialog(
         if (granted) {
             handleDeviceSubscriptions(DeviceSubscriptionReader.read(context))
         } else {
-            importMessage = "未授予电话权限，仍可手动填写 eSIM 信息。"
+            importMessage = context.getString(R.string.import_permission_denied)
         }
     }
 
@@ -819,10 +865,14 @@ private fun ESimEditorDialog(
                         TextButton(onClick = onClose) {
                             Icon(Icons.Default.Close, contentDescription = null)
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("关闭")
+                            Text(stringResource(R.string.close))
                         }
                         Text(
-                            text = if (card == null) "添加 eSIM" else "编辑 eSIM",
+                            text = if (card == null) {
+                                stringResource(R.string.editor_add_title)
+                            } else {
+                                stringResource(R.string.editor_edit_title)
+                            },
                             modifier = Modifier.weight(1f),
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                             fontWeight = FontWeight.Bold,
@@ -836,6 +886,7 @@ private fun ESimEditorDialog(
                                         name = name,
                                         phoneNumber = phone,
                                         country = selectedCountry,
+                                        countryName = selectedCountry.displayName(useChinese),
                                         balanceText = balance,
                                         startDate = startDate,
                                         cycleDays = if (useCycle) parsedCycleDays else null,
@@ -846,7 +897,7 @@ private fun ESimEditorDialog(
                             },
                             enabled = isValid,
                         ) {
-                            Text("保存")
+                            Text(stringResource(R.string.save))
                         }
                     }
                 }
@@ -866,50 +917,50 @@ private fun ESimEditorDialog(
                         )
                     }
                     item {
-                        FormSection(title = "基础信息") {
+                        FormSection(title = stringResource(R.string.section_basic)) {
                             RoundedTextField(
                                 value = name,
                                 onValueChange = { name = it },
-                                label = "运营商/名称",
-                                placeholder = "例如 US Mobile",
+                                label = stringResource(R.string.field_name),
+                                placeholder = stringResource(R.string.field_name_placeholder),
                             )
                             RoundedTextField(
                                 value = phone,
                                 onValueChange = { phone = it },
-                                label = "手机号",
-                                placeholder = "例如 +13020000000",
+                                label = stringResource(R.string.field_phone),
+                                placeholder = stringResource(R.string.field_phone_placeholder),
                                 keyboardType = KeyboardType.Phone,
                             )
                             RoundedTextField(
                                 value = balance,
                                 onValueChange = { balance = it },
-                                label = "余额",
-                                placeholder = "例如 4.5万、10元、$3.2",
+                                label = stringResource(R.string.field_balance),
+                                placeholder = stringResource(R.string.field_balance_placeholder),
                             )
                             PickerRow(
-                                label = "国家/地区",
-                                value = "${selectedCountry.flagEmoji}  ${selectedCountry.countryName}  ${selectedCountry.dialCode}",
+                                label = stringResource(R.string.field_country),
+                                value = "${selectedCountry.flagEmoji}  ${selectedCountry.displayName(useChinese)}  ${selectedCountry.dialCode}",
                                 onClick = { showCountryPicker = true },
                             )
                         }
                     }
                     item {
-                        FormSection(title = "保号规则") {
+                        FormSection(title = stringResource(R.string.section_rule)) {
                             PickerRow(
-                                label = "开始日期",
-                                value = startDate.format(dateFormatter),
+                                label = stringResource(R.string.field_start_date),
+                                value = startDate.formatForLocale(context),
                                 onClick = { dateTarget = DateTarget.Start },
                             )
                             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                 FilterChip(
                                     selected = useCycle,
                                     onClick = { useCycle = true },
-                                    label = { Text("按周期") },
+                                    label = { Text(stringResource(R.string.rule_cycle)) },
                                 )
                                 FilterChip(
                                     selected = !useCycle,
                                     onClick = { useCycle = false },
-                                    label = { Text("直接到期日") },
+                                    label = { Text(stringResource(R.string.rule_expiry_date)) },
                                 )
                             }
                             if (useCycle) {
@@ -918,32 +969,35 @@ private fun ESimEditorDialog(
                                     onValueChange = { value: String ->
                                         cycleDaysText = value.filter(Char::isDigit)
                                     },
-                                    label = "保号周期天数",
-                                    placeholder = "例如 30",
+                                    label = stringResource(R.string.field_cycle_days),
+                                    placeholder = stringResource(R.string.field_cycle_days_placeholder),
                                     keyboardType = KeyboardType.Number,
                                 )
-                                ReadOnlyInfoRow(label = "自动到期日", value = expiryDate.format(dateFormatter))
+                                ReadOnlyInfoRow(
+                                    label = stringResource(R.string.field_auto_expiry),
+                                    value = expiryDate.formatForLocale(context),
+                                )
                             } else {
                                 PickerRow(
-                                    label = "到期日",
-                                    value = expiryDate.format(dateFormatter),
+                                    label = stringResource(R.string.field_expiry_date),
+                                    value = expiryDate.formatForLocale(context),
                                     onClick = { dateTarget = DateTarget.Expiry },
                                 )
                             }
                         }
                     }
                     item {
-                        FormSection(title = "提醒") {
+                        FormSection(title = stringResource(R.string.section_reminder)) {
                             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                 FilterChip(
                                     selected = reminderEnabled,
                                     onClick = { reminderEnabled = true },
-                                    label = { Text("开启提醒") },
+                                    label = { Text(stringResource(R.string.reminder_enabled)) },
                                 )
                                 FilterChip(
                                     selected = !reminderEnabled,
                                     onClick = { reminderEnabled = false },
-                                    label = { Text("不提醒") },
+                                    label = { Text(stringResource(R.string.reminder_disabled)) },
                                 )
                             }
                             if (reminderEnabled) {
@@ -952,16 +1006,16 @@ private fun ESimEditorDialog(
                                     onValueChange = { value: String ->
                                         reminderDaysText = value.filter(Char::isDigit)
                                     },
-                                    label = "提前提醒天数",
-                                    placeholder = "例如 3",
+                                    label = stringResource(R.string.field_reminder_days),
+                                    placeholder = stringResource(R.string.field_reminder_days_placeholder),
                                     keyboardType = KeyboardType.Number,
                                 )
                                 ReadOnlyInfoRow(
-                                    label = "日历提醒",
+                                    label = stringResource(R.string.field_calendar_reminder),
                                     value = if (parsedReminderDays == 0) {
-                                        "到期当天"
+                                        stringResource(R.string.reminder_today)
                                     } else {
-                                        "提前 ${parsedReminderDays ?: 0} 天"
+                                        stringResource(R.string.reminder_days_before, parsedReminderDays ?: 0)
                                     },
                                 )
                             }
@@ -972,12 +1026,19 @@ private fun ESimEditorDialog(
                                         context,
                                         ESimCard(
                                             id = card?.id ?: 0,
-                                            name = name.trim().ifBlank { "${selectedCountry.countryName} eSIM" },
+                                            name = name.trim().ifBlank {
+                                                context.getString(
+                                                    R.string.default_esim_name,
+                                                    selectedCountry.displayName(useChinese),
+                                                )
+                                            },
                                             phoneNumber = phone.trim(),
-                                            countryName = selectedCountry.countryName,
+                                            countryName = selectedCountry.displayName(useChinese),
                                             countryCode = selectedCountry.countryCode,
                                             flagEmoji = selectedCountry.flagEmoji,
-                                            balanceText = balance.trim().ifBlank { "未填写" },
+                                            balanceText = balance.trim().ifBlank {
+                                                context.getString(R.string.value_not_set)
+                                            },
                                             startDate = startDate,
                                             cycleDays = if (useCycle) parsedCycleDays else null,
                                             expiryDate = expiryDate,
@@ -1004,7 +1065,7 @@ private fun ESimEditorDialog(
                                 )
                                 Spacer(modifier = Modifier.width(10.dp))
                                 Text(
-                                    text = "加入系统日历",
+                                    text = stringResource(R.string.calendar_button),
                                     fontSize = 16.sp,
                                     fontWeight = FontWeight.Bold,
                                 )
@@ -1081,16 +1142,16 @@ private fun SimImportPanel(
                 )
                 Spacer(modifier = Modifier.width(10.dp))
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("读取本机 SIM/eSIM", fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.sim_import_title), fontWeight = FontWeight.Bold)
                     Text(
-                        "自动预填运营商、手机号和国家；读不到的字段可手动补充。",
+                        stringResource(R.string.sim_import_body),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 13.sp,
                     )
                 }
             }
             TextButton(onClick = onRead) {
-                Text("授权并读取")
+                Text(stringResource(R.string.sim_import_action))
             }
             message?.let {
                 Text(
@@ -1109,14 +1170,19 @@ private fun DeviceSubscriptionPickerDialog(
     onDismiss: () -> Unit,
     onSelected: (DeviceSubscriptionInfo) -> Unit,
 ) {
+    val context = LocalContext.current
     Dialog(onDismissRequest = onDismiss) {
         GlassSurface(
             shape = RoundedCornerShape(26.dp),
             contentPadding = PaddingValues(18.dp),
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("选择要导入的号码", fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                Text(stringResource(R.string.subscription_picker_title), fontWeight = FontWeight.Bold, fontSize = 20.sp)
                 subscriptions.forEach { info ->
+                    val title = info.displayTitle(
+                        defaultEsimTitle = stringResource(R.string.device_esim),
+                        defaultSimTitle = stringResource(R.string.device_sim),
+                    )
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1129,12 +1195,12 @@ private fun DeviceSubscriptionPickerDialog(
                         Text(if (info.isEmbedded) "eSIM" else "SIM", color = KeeperBlue, fontWeight = FontWeight.Bold)
                         Spacer(modifier = Modifier.width(12.dp))
                         Column(modifier = Modifier.weight(1f)) {
-                            Text(info.displayTitle, fontWeight = FontWeight.SemiBold)
+                            Text(title, fontWeight = FontWeight.SemiBold)
                             Text(
                                 listOfNotNull(
                                     info.phoneNumber.ifBlank { null },
                                     info.countryIso.ifBlank { null },
-                                    "卡槽 ${info.slotIndex + 1}",
+                                    context.getString(R.string.slot_label, info.slotIndex + 1),
                                 ).joinToString(" · "),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 13.sp,
@@ -1143,7 +1209,7 @@ private fun DeviceSubscriptionPickerDialog(
                     }
                 }
                 TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.End)) {
-                    Text("取消")
+                    Text(stringResource(R.string.cancel))
                 }
             }
         }
@@ -1245,8 +1311,10 @@ private fun CountryPickerDialog(
     onDismiss: () -> Unit,
     onSelected: (CountryOption) -> Unit,
 ) {
+    val context = LocalContext.current
+    val useChinese = context.isChineseLanguage()
     var query by remember { mutableStateOf("") }
-    val results = remember(query) { Countries.search(query) }
+    val results = remember(query, useChinese) { Countries.search(query, useChinese) }
 
     Dialog(onDismissRequest = onDismiss) {
         GlassSurface(
@@ -1254,7 +1322,7 @@ private fun CountryPickerDialog(
             contentPadding = PaddingValues(18.dp),
         ) {
             Column {
-                Text("选择国家/地区", fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                Text(stringResource(R.string.country_picker_title), fontWeight = FontWeight.Bold, fontSize = 20.sp)
                 Spacer(modifier = Modifier.height(12.dp))
                 SearchField(value = query, onValueChange = { query = it })
                 Spacer(modifier = Modifier.height(12.dp))
@@ -1273,7 +1341,7 @@ private fun CountryPickerDialog(
                         ) {
                             Text(option.flagEmoji, fontSize = 26.sp, modifier = Modifier.width(44.dp))
                             Column(modifier = Modifier.weight(1f)) {
-                                Text(option.countryName, fontWeight = FontWeight.SemiBold)
+                                Text(option.displayName(useChinese), fontWeight = FontWeight.SemiBold)
                                 Text(
                                     "${option.countryCode} · ${option.dialCode}",
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1308,12 +1376,12 @@ private fun DatePickerModal(
                     state.selectedDateMillis?.let { onSelected(it.toLocalDate()) }
                 },
             ) {
-                Text("确定")
+                Text(stringResource(R.string.confirm))
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("取消")
+                Text(stringResource(R.string.cancel))
             }
         },
     ) {
