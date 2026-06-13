@@ -1,7 +1,6 @@
 package com.baohao.esimkeeper.ui
 
 import android.app.Application
-import android.content.Context
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -11,9 +10,13 @@ import com.baohao.esimkeeper.data.AppDatabase
 import com.baohao.esimkeeper.data.CountryOption
 import com.baohao.esimkeeper.data.ESimCard
 import com.baohao.esimkeeper.data.ESimRepository
+import com.baohao.esimkeeper.data.SettingsRepository
+import com.baohao.esimkeeper.data.SortOrder
 import com.baohao.esimkeeper.domain.ExpiryCalculator
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.time.Instant
@@ -31,10 +34,26 @@ data class CardEditorInput(
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
-    private val preferences = application.getSharedPreferences("esim_hub_preferences", Context.MODE_PRIVATE)
+    private val settingsRepository = SettingsRepository(application)
     private val repository = ESimRepository(AppDatabase.get(application).eSimCardDao())
 
-    val cards: StateFlow<List<ESimCard>> = repository.cards.stateIn(
+    private val _sortOrder = MutableStateFlow(SortOrder.EXPIRY_ASC)
+    val sortOrder: StateFlow<SortOrder> = _sortOrder
+
+    init {
+        viewModelScope.launch {
+            settingsRepository.sortOrder.collect { _sortOrder.value = it }
+        }
+    }
+
+    val cards: StateFlow<List<ESimCard>> = combine(repository.cards, _sortOrder) { cards, order ->
+        when (order) {
+            SortOrder.EXPIRY_ASC -> cards.sortedBy { it.expiryDate }
+            SortOrder.CREATED_DESC -> cards.sortedByDescending { it.createdAt }
+            SortOrder.NAME_ASC -> cards.sortedBy { it.name.lowercase() }
+            SortOrder.BALANCE_DESC -> cards.sortedByDescending { parseBalance(it.balanceText) }
+        }
+    }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),
         initialValue = emptyList(),
@@ -49,15 +68,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     var isAdding by mutableStateOf(false)
         private set
 
-    var isDarkMode by mutableStateOf(preferences.getBoolean(KEY_DARK_MODE, false))
+    var isDarkMode by mutableStateOf(false)
         private set
 
     val isEditorOpen: Boolean
         get() = isAdding || editorTarget != null
 
+    init {
+        viewModelScope.launch {
+            settingsRepository.isDarkMode.collect { isDarkMode = it }
+        }
+    }
+
     fun toggleDarkMode() {
-        isDarkMode = !isDarkMode
-        preferences.edit().putBoolean(KEY_DARK_MODE, isDarkMode).apply()
+        viewModelScope.launch {
+            settingsRepository.setDarkMode(!isDarkMode)
+        }
+    }
+
+    fun setSortOrder(order: SortOrder) {
+        viewModelScope.launch {
+            settingsRepository.setSortOrder(order)
+        }
     }
 
     fun updateSearchQuery(query: String) {
@@ -125,7 +157,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun saveCardDirect(card: ESimCard) {
+        viewModelScope.launch {
+            repository.save(card)
+        }
+    }
+
     companion object {
-        private const val KEY_DARK_MODE = "dark_mode"
+        private fun parseBalance(text: String): Double {
+            val cleaned = text.replace(Regex("[^0-9.]"), "")
+            return cleaned.toDoubleOrNull() ?: 0.0
+        }
     }
 }

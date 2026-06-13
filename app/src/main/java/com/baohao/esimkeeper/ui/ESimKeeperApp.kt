@@ -2,6 +2,7 @@ package com.baohao.esimkeeper.ui
 
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.provider.CalendarContract
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -49,6 +50,9 @@ import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Sort
+import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DatePicker
@@ -97,9 +101,12 @@ import com.baohao.esimkeeper.data.CountryOption
 import com.baohao.esimkeeper.data.DeviceSubscriptionInfo
 import com.baohao.esimkeeper.data.DeviceSubscriptionReader
 import com.baohao.esimkeeper.data.ESimCard
+import com.baohao.esimkeeper.data.SortOrder
 import com.baohao.esimkeeper.domain.ExpiryCalculator
 import com.baohao.esimkeeper.domain.ExpiryStatus
 import kotlinx.coroutines.delay
+import java.io.BufferedReader
+import java.io.InputStreamReader
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -123,6 +130,24 @@ fun ESimKeeperApp(viewModel: MainViewModel) {
     var today by remember { mutableStateOf(LocalDate.now()) }
     var selectedFilter by remember { mutableStateOf(CardFilter.All) }
     var showDonationDialog by remember { mutableStateOf(false) }
+    var showSortMenu by remember { mutableStateOf(false) }
+    val currentSortOrder by viewModel.sortOrder.collectAsStateWithLifecycle()
+    val exportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json"),
+    ) { uri ->
+        uri?.let { exportCardsToJson(context, it, cards) }
+    }
+    val importLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        uri?.let {
+            val imported = importCardsFromJson(context, it)
+            imported.forEach { card -> viewModel.saveCardDirect(card) }
+            if (imported.isNotEmpty()) {
+                Toast.makeText(context, "已导入 ${imported.size} 张卡片", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
 
     LaunchedEffect(Unit) {
         while (true) {
@@ -177,8 +202,15 @@ fun ESimKeeperApp(viewModel: MainViewModel) {
             HomeHeader(
                 cardCount = cards.size,
                 isDarkMode = viewModel.isDarkMode,
+                sortOrder = currentSortOrder,
                 onToggleTheme = viewModel::toggleDarkMode,
                 onOpenDonation = { showDonationDialog = true },
+                onToggleSort = { showSortMenu = !showSortMenu },
+                onExport = { exportLauncher.launch("esim_cards_backup.json") },
+                onImport = { importLauncher.launch(arrayOf("application/json")) },
+                showSortMenu = showSortMenu,
+                onDismissSortMenu = { showSortMenu = false },
+                onSelectSortOrder = { viewModel.setSortOrder(it) },
             )
             SearchField(
                 value = viewModel.searchQuery,
@@ -237,8 +269,15 @@ fun ESimKeeperApp(viewModel: MainViewModel) {
 private fun HomeHeader(
     cardCount: Int,
     isDarkMode: Boolean,
+    sortOrder: SortOrder,
     onToggleTheme: () -> Unit,
     onOpenDonation: () -> Unit,
+    onToggleSort: () -> Unit,
+    onExport: () -> Unit,
+    onImport: () -> Unit,
+    showSortMenu: Boolean,
+    onDismissSortMenu: () -> Unit,
+    onSelectSortOrder: (SortOrder) -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -260,6 +299,81 @@ private fun HomeHeader(
             )
         }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Box {
+                GlassSurface(
+                    modifier = Modifier.size(46.dp),
+                    shape = CircleShape,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clickable(onClick = onToggleSort),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Sort,
+                            contentDescription = "排序",
+                            tint = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.size(22.dp),
+                        )
+                    }
+                }
+                DropdownMenu(
+                    expanded = showSortMenu,
+                    onDismissRequest = onDismissSortMenu,
+                ) {
+                    SortOrder.entries.forEach { order ->
+                        DropdownMenuItem(
+                            text = { Text(order.label) },
+                            leadingIcon = {
+                                if (order == sortOrder) {
+                                    Icon(Icons.Default.Check, contentDescription = null, tint = KeeperBlue)
+                                }
+                            },
+                            onClick = {
+                                onSelectSortOrder(order)
+                                onDismissSortMenu()
+                            },
+                        )
+                    }
+                }
+            }
+            GlassSurface(
+                modifier = Modifier.size(46.dp),
+                shape = CircleShape,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clickable(onClick = onExport),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.FileDownload,
+                        contentDescription = "导出",
+                        tint = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.size(22.dp),
+                    )
+                }
+            }
+            GlassSurface(
+                modifier = Modifier.size(46.dp),
+                shape = CircleShape,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clickable(onClick = onImport),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.FileUpload,
+                        contentDescription = "导入",
+                        tint = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.size(22.dp),
+                    )
+                }
+            }
             GlassSurface(
                 modifier = Modifier.size(46.dp),
                 shape = CircleShape,
@@ -1326,3 +1440,111 @@ private fun LocalDate.toPickerMillis(): Long =
 
 private fun Long.toLocalDate(): LocalDate =
     Instant.ofEpochMilli(this).atZone(ZoneOffset.UTC).toLocalDate()
+
+// ── JSON Export / Import ──────────────────────────────────────────────────────
+
+private fun exportCardsToJson(context: Context, uri: Uri, cards: List<ESimCard>) {
+    runCatching {
+        val jsonArray = buildString {
+            append("[")
+            cards.forEachIndexed { index, card ->
+                if (index > 0) append(",")
+                append("{")
+                append("\"name\":\"${card.name.jsonEscape()}",")
+                append("\"phoneNumber\":\"${card.phoneNumber.jsonEscape()}",")
+                append("\"countryName\":\"${card.countryName.jsonEscape()}",")
+                append("\"countryCode\":\"${card.countryCode.jsonEscape()}",")
+                append("\"flagEmoji\":\"${card.flagEmoji.jsonEscape()}",")
+                append("\"balanceText\":\"${card.balanceText.jsonEscape()}",")
+                append("\"startDate\":\"${card.startDate}",")
+                append("\"cycleDays\":${card.cycleDays ?: "null"},")
+                append("\"expiryDate\":\"${card.expiryDate}",")
+                append("\"reminderDaysBefore\":${card.reminderDaysBefore ?: "null"},")
+                append("\"createdAt\":\"${card.createdAt}",")
+                append("\"updatedAt\":\"${card.updatedAt}")
+                append("}")
+            }
+            append("]")
+        }
+        context.contentResolver.openOutputStream(uri)?.use { out ->
+            out.write(jsonArray.toByteArray(Charsets.UTF_8))
+        }
+        Toast.makeText(context, "已导出 ${cards.size} 张卡片", Toast.LENGTH_SHORT).show()
+    }.onFailure {
+        Toast.makeText(context, "导出失败: ${it.message}", Toast.LENGTH_SHORT).show()
+    }
+}
+
+private fun importCardsFromJson(context: Context, uri: Uri): List<ESimCard> {
+    return runCatching {
+        val text = context.contentResolver.openInputStream(uri)?.use { input ->
+            BufferedReader(InputStreamReader(input, Charsets.UTF_8)).readText()
+        } ?: return emptyList()
+
+        val items = mutableListOf<ESimCard>()
+        val raw = text.trim()
+        if (!raw.startsWith("[")) return emptyList()
+
+        // Simple JSON array parser for our known format
+        val entries = raw.removeSurrounding("[", "]").splitJsonObjects()
+        for (entry in entries) {
+            val name = entry.jsonField("name") ?: continue
+            val phoneNumber = entry.jsonField("phoneNumber") ?: ""
+            val countryName = entry.jsonField("countryName") ?: ""
+            val countryCode = entry.jsonField("countryCode") ?: ""
+            val flagEmoji = entry.jsonField("flagEmoji") ?: ""
+            val balanceText = entry.jsonField("balanceText") ?: "未填写"
+            val startDate = entry.jsonField("startDate")?.let { LocalDate.parse(it) } ?: continue
+            val expiryDate = entry.jsonField("expiryDate")?.let { LocalDate.parse(it) } ?: continue
+            val cycleDays = entry.jsonField("cycleDays")?.toIntOrNull()
+            val reminderDaysBefore = entry.jsonField("reminderDaysBefore")?.toIntOrNull()
+            val now = Instant.now()
+            items.add(
+                ESimCard(
+                    id = 0,
+                    name = name,
+                    phoneNumber = phoneNumber,
+                    countryName = countryName,
+                    countryCode = countryCode,
+                    flagEmoji = flagEmoji,
+                    balanceText = balanceText,
+                    startDate = startDate,
+                    cycleDays = cycleDays,
+                    expiryDate = expiryDate,
+                    reminderDaysBefore = reminderDaysBefore,
+                    createdAt = now,
+                    updatedAt = now,
+                )
+            )
+        }
+        items
+    }.getOrElse {
+        Toast.makeText(context, "导入失败: ${it.message}", Toast.LENGTH_SHORT).show()
+        emptyList()
+    }
+}
+
+private fun String.jsonEscape(): String =
+    replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r")
+
+private fun String.jsonField(key: String): String? {
+    val pattern = Regex("\"$key\"\\s*:\\s*\"([^\"]*)\"")
+    return pattern.find(this)?.groupValues?.get(1)?.replace("\\n", "\n")?.replace("\\r", "\r")?.replace("\\\"", "\"")?.replace("\\\\", "\\")
+        ?: run {
+            val numPattern = Regex("\"$key\"\\s*:\\s*(null|\\d+)")
+            numPattern.find(this)?.groupValues?.get(1)?.takeIf { it != "null" }
+        }
+}
+
+private fun String.splitJsonObjects(): List<String> {
+    val result = mutableListOf<String>()
+    var depth = 0
+    var start = -1
+    for (i in indices) {
+        when (this[i]) {
+            '{' -> { if (depth == 0) start = i; depth++ }
+            '}' -> { depth--; if (depth == 0 && start >= 0) { result.add(substring(start, i + 1)); start = -1 } }
+        }
+    }
+    return result
+}
