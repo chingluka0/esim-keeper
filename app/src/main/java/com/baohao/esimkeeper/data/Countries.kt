@@ -49,4 +49,31 @@ object Countries {
         val normalized = countryIso.trim().uppercase()
         return common.firstOrNull { it.countryCode == normalized }
     }
+
+    /**
+     * Resolve a country from an international phone number by its dialing code.
+     *
+     * The carrier-reported ISO can be unreliable for travel/global eSIMs (e.g. a
+     * US +1 SIM whose underlying network is hosted in Hong Kong reports HK), so
+     * the phone number itself is a more trustworthy signal when it is in
+     * international (`+`) form.
+     *
+     * Matching uses the longest dialing-code prefix. When several countries share
+     * the same code (e.g. US and Canada both use +1), the first one declared in
+     * [common] wins, which keeps +1 mapped to the United States.
+     */
+    fun findByPhoneNumber(phoneNumber: String): CountryOption? {
+        val normalized = buildString {
+            for (ch in phoneNumber.trim()) {
+                when {
+                    ch == '+' && isEmpty() -> append('+')
+                    ch.isDigit() -> append(ch)
+                }
+            }
+        }
+        if (!normalized.startsWith("+") || normalized.length < 2) return null
+        return common
+            .filter { normalized.startsWith(it.dialCode) }
+            .maxByOrNull { it.dialCode.length }
+    }
 }

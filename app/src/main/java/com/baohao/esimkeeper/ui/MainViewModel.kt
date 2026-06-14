@@ -16,6 +16,7 @@ import com.baohao.esimkeeper.data.CountryOption
 import com.baohao.esimkeeper.data.ESimCard
 import com.baohao.esimkeeper.data.ESimRepository
 import com.baohao.esimkeeper.data.SettingsRepository
+import com.baohao.esimkeeper.data.Tariff
 import com.baohao.esimkeeper.data.backup.CardBackupJson
 import com.baohao.esimkeeper.domain.ExpiryCalculator
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -188,11 +189,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             reminderDaysBefore = input.reminderDaysBefore,
             createdAt = existing?.createdAt ?: now,
             updatedAt = now,
+            // Preserve any saved number-charges when editing other fields.
+            tariff = existing?.tariff ?: Tariff.EMPTY,
         )
 
         viewModelScope.launch {
             repository.save(card)
             closeEditor()
+        }
+    }
+
+    fun updateTariff(card: ESimCard, tariff: Tariff) {
+        viewModelScope.launch {
+            repository.save(card.copy(tariff = tariff, updatedAt = Instant.now()))
         }
     }
 

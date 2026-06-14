@@ -1,6 +1,7 @@
 package com.baohao.esimkeeper.data.backup
 
 import com.baohao.esimkeeper.data.ESimCard
+import com.baohao.esimkeeper.data.Tariff
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -54,6 +55,61 @@ class CardBackupJsonTest {
         assertEquals(original.reminderDaysBefore, imported.single().reminderDaysBefore)
         assertEquals(original.createdAt, imported.single().createdAt)
         assertEquals(original.updatedAt, imported.single().updatedAt)
+    }
+
+    @Test
+    fun encodeAndDecodePreservesTariff() {
+        val tariff = Tariff(
+            outgoingCall = "£1/min",
+            incomingCall = "Free",
+            outgoingSms = "30p/SMS",
+            incomingSms = "Free",
+            dataTraffic = "20p/MB",
+        )
+        val json = CardBackupJson.encode(
+            cards = listOf(card(name = "UK SIM").copy(tariff = tariff)),
+            exportedAt = Instant.parse("2026-06-14T08:00:00Z"),
+        )
+
+        val imported = CardBackupJson.decodeCards(
+            json = json,
+            importedAt = Instant.parse("2026-06-14T09:00:00Z"),
+        ).getOrThrow()
+
+        assertEquals(tariff, imported.single().tariff)
+    }
+
+    @Test
+    fun decodeOldBackupWithoutTariffDefaultsToEmpty() {
+        val json = """
+            {
+              "version": 1,
+              "exportedAt": "2026-06-14T08:00:00Z",
+              "cards": [
+                {
+                  "name": "Legacy",
+                  "phoneNumber": "+819012345678",
+                  "countryName": "Japan",
+                  "countryCode": "JP",
+                  "flagEmoji": "JP",
+                  "balanceText": "JPY 1000",
+                  "startDate": "2026-01-01",
+                  "cycleDays": 90,
+                  "expiryDate": "2026-04-01",
+                  "reminderDaysBefore": 3,
+                  "createdAt": "2026-01-01T00:00:00Z",
+                  "updatedAt": "2026-01-02T00:00:00Z"
+                }
+              ]
+            }
+        """.trimIndent()
+
+        val imported = CardBackupJson.decodeCards(
+            json = json,
+            importedAt = Instant.parse("2026-06-14T09:00:00Z"),
+        ).getOrThrow()
+
+        assertEquals(Tariff.EMPTY, imported.single().tariff)
     }
 
     @Test
