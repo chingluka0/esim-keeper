@@ -9,12 +9,16 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.baohao.esimkeeper.R
 import com.baohao.esimkeeper.data.AppDatabase
+import com.baohao.esimkeeper.data.CardSortOrder
+import com.baohao.esimkeeper.data.CardSorter
 import com.baohao.esimkeeper.data.CountryOption
 import com.baohao.esimkeeper.data.ESimCard
 import com.baohao.esimkeeper.data.ESimRepository
 import com.baohao.esimkeeper.domain.ExpiryCalculator
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.time.Instant
@@ -35,8 +39,15 @@ data class CardEditorInput(
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val preferences = application.getSharedPreferences("esim_hub_preferences", Context.MODE_PRIVATE)
     private val repository = ESimRepository(AppDatabase.get(application).eSimCardDao())
+    private val _sortOrder = MutableStateFlow(
+        CardSortOrder.fromPreferenceValue(preferences.getString(KEY_SORT_ORDER, null)),
+    )
 
-    val cards: StateFlow<List<ESimCard>> = repository.cards.stateIn(
+    val sortOrder: StateFlow<CardSortOrder> = _sortOrder
+
+    val cards: StateFlow<List<ESimCard>> = combine(repository.cards, _sortOrder) { cards, sortOrder ->
+        CardSorter.sort(cards, sortOrder)
+    }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),
         initialValue = emptyList(),
@@ -60,6 +71,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun toggleDarkMode() {
         isDarkMode = !isDarkMode
         preferences.edit().putBoolean(KEY_DARK_MODE, isDarkMode).apply()
+    }
+
+    fun setSortOrder(order: CardSortOrder) {
+        _sortOrder.value = order
+        preferences.edit().putString(KEY_SORT_ORDER, order.preferenceValue).apply()
     }
 
     fun updateSearchQuery(query: String) {
@@ -133,5 +149,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     companion object {
         private const val KEY_DARK_MODE = "dark_mode"
+        private const val KEY_SORT_ORDER = "sort_order"
     }
 }

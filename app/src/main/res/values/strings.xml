@@ -13,6 +13,10 @@
     <string name="filter_warning">Expiring soon</string>
     <string name="filter_expired">Expired</string>
     <string name="filter_long_term">Long-term</string>
+    <string name="sort_menu_content_description">Sort cards</string>
+    <string name="sort_by_expiry_date">Expiry date</string>
+    <string name="sort_by_created_at">Creation time</string>
+    <string name="sort_by_name">Name</string>
     <string name="search_placeholder">Search carrier, country, or number</string>
     <string name="empty_filtered_title">No matching cards</string>
     <string name="empty_title">No eSIM cards yet</string>

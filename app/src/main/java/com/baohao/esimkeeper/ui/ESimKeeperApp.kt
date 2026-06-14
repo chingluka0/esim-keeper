@@ -46,6 +46,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.Refresh
@@ -95,6 +96,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.baohao.esimkeeper.R
+import com.baohao.esimkeeper.data.CardSortOrder
 import com.baohao.esimkeeper.data.Countries
 import com.baohao.esimkeeper.data.CountryOption
 import com.baohao.esimkeeper.data.DeviceSubscriptionInfo
@@ -130,6 +132,7 @@ private fun LocalDate.formatForLocale(context: Context): String =
 @Composable
 fun ESimKeeperApp(viewModel: MainViewModel) {
     val cards by viewModel.cards.collectAsStateWithLifecycle()
+    val sortOrder by viewModel.sortOrder.collectAsStateWithLifecycle()
     val colorScheme = MaterialTheme.colorScheme
     var today by remember { mutableStateOf(LocalDate.now()) }
     var selectedFilter by remember { mutableStateOf(CardFilter.All) }
@@ -188,8 +191,10 @@ fun ESimKeeperApp(viewModel: MainViewModel) {
             HomeHeader(
                 cardCount = cards.size,
                 isDarkMode = viewModel.isDarkMode,
+                sortOrder = sortOrder,
                 onToggleTheme = viewModel::toggleDarkMode,
                 onOpenDonation = { showDonationDialog = true },
+                onSelectSortOrder = viewModel::setSortOrder,
             )
             SearchField(
                 value = viewModel.searchQuery,
@@ -252,9 +257,13 @@ fun ESimKeeperApp(viewModel: MainViewModel) {
 private fun HomeHeader(
     cardCount: Int,
     isDarkMode: Boolean,
+    sortOrder: CardSortOrder,
     onToggleTheme: () -> Unit,
     onOpenDonation: () -> Unit,
+    onSelectSortOrder: (CardSortOrder) -> Unit,
 ) {
+    var showSortMenu by remember { mutableStateOf(false) }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -279,6 +288,48 @@ private fun HomeHeader(
             )
         }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Box {
+                GlassSurface(
+                    modifier = Modifier.size(46.dp),
+                    shape = CircleShape,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clickable { showSortMenu = true },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.MoreVert,
+                            contentDescription = stringResource(R.string.sort_menu_content_description),
+                            tint = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                }
+                DropdownMenu(
+                    expanded = showSortMenu,
+                    onDismissRequest = { showSortMenu = false },
+                ) {
+                    CardSortOrder.entries.forEach { order ->
+                        DropdownMenuItem(
+                            text = { Text(stringResource(order.labelRes())) },
+                            leadingIcon = {
+                                if (order == sortOrder) {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = null,
+                                        tint = KeeperBlue,
+                                    )
+                                }
+                            },
+                            onClick = {
+                                onSelectSortOrder(order)
+                                showSortMenu = false
+                            },
+                        )
+                    }
+                }
+            }
             GlassSurface(
                 modifier = Modifier.size(46.dp),
                 shape = CircleShape,
@@ -316,6 +367,14 @@ private fun HomeHeader(
         }
     }
 }
+
+@StringRes
+private fun CardSortOrder.labelRes(): Int =
+    when (this) {
+        CardSortOrder.ExpiryDate -> R.string.sort_by_expiry_date
+        CardSortOrder.CreatedAt -> R.string.sort_by_created_at
+        CardSortOrder.Name -> R.string.sort_by_name
+    }
 
 @Composable
 private fun FilterBar(
