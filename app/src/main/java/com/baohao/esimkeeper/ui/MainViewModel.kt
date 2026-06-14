@@ -1,7 +1,6 @@
 package com.baohao.esimkeeper.ui
 
 import android.app.Application
-import android.content.Context
 import android.net.Uri
 import androidx.annotation.StringRes
 import androidx.compose.runtime.getValue
@@ -16,6 +15,7 @@ import com.baohao.esimkeeper.data.CardSorter
 import com.baohao.esimkeeper.data.CountryOption
 import com.baohao.esimkeeper.data.ESimCard
 import com.baohao.esimkeeper.data.ESimRepository
+import com.baohao.esimkeeper.data.SettingsRepository
 import com.baohao.esimkeeper.data.backup.CardBackupJson
 import com.baohao.esimkeeper.domain.ExpiryCalculator
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -48,11 +48,9 @@ data class CardEditorInput(
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
-    private val preferences = application.getSharedPreferences("esim_hub_preferences", Context.MODE_PRIVATE)
     private val repository = ESimRepository(AppDatabase.get(application).eSimCardDao())
-    private val _sortOrder = MutableStateFlow(
-        CardSortOrder.fromPreferenceValue(preferences.getString(KEY_SORT_ORDER, null)),
-    )
+    private val settingsRepository = SettingsRepository(application)
+    private val _sortOrder = MutableStateFlow(CardSortOrder.default)
 
     val sortOrder: StateFlow<CardSortOrder> = _sortOrder
 
@@ -73,7 +71,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     var isAdding by mutableStateOf(false)
         private set
 
-    var isDarkMode by mutableStateOf(preferences.getBoolean(KEY_DARK_MODE, false))
+    var isDarkMode by mutableStateOf(false)
         private set
 
     var backupNotice by mutableStateOf<BackupNotice?>(null)
@@ -82,14 +80,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val isEditorOpen: Boolean
         get() = isAdding || editorTarget != null
 
+    init {
+        viewModelScope.launch {
+            settingsRepository.settings.collect { settings ->
+                isDarkMode = settings.isDarkMode
+                _sortOrder.value = settings.sortOrder
+            }
+        }
+    }
+
     fun toggleDarkMode() {
-        isDarkMode = !isDarkMode
-        preferences.edit().putBoolean(KEY_DARK_MODE, isDarkMode).apply()
+        viewModelScope.launch {
+            settingsRepository.setDarkMode(!isDarkMode)
+        }
     }
 
     fun setSortOrder(order: CardSortOrder) {
-        _sortOrder.value = order
-        preferences.edit().putString(KEY_SORT_ORDER, order.preferenceValue).apply()
+        viewModelScope.launch {
+            settingsRepository.setSortOrder(order)
+        }
     }
 
     fun exportBackup(uri: Uri) {
@@ -205,10 +214,5 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 ),
             )
         }
-    }
-
-    companion object {
-        private const val KEY_DARK_MODE = "dark_mode"
-        private const val KEY_SORT_ORDER = "sort_order"
     }
 }
