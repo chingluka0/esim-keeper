@@ -1,5 +1,6 @@
 package com.baohao.esimkeeper.data
 
+import androidx.room.Embedded
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 import java.time.Instant
@@ -21,4 +22,6 @@ data class ESimCard(
     val reminderDaysBefore: Int?,
     val createdAt: Instant,
     val updatedAt: Instant,
+    @Embedded(prefix = "tariff_")
+    val tariff: Tariff = Tariff.EMPTY,
 )

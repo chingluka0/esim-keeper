@@ -34,6 +34,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -46,7 +47,11 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.FileUpload
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
@@ -95,11 +100,13 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.baohao.esimkeeper.R
+import com.baohao.esimkeeper.data.CardSortOrder
 import com.baohao.esimkeeper.data.Countries
 import com.baohao.esimkeeper.data.CountryOption
 import com.baohao.esimkeeper.data.DeviceSubscriptionInfo
 import com.baohao.esimkeeper.data.DeviceSubscriptionReader
 import com.baohao.esimkeeper.data.ESimCard
+import com.baohao.esimkeeper.data.Tariff
 import com.baohao.esimkeeper.domain.ExpiryCalculator
 import com.baohao.esimkeeper.domain.ExpiryStatus
 import kotlinx.coroutines.delay
@@ -115,7 +122,6 @@ private enum class CardFilter(@StringRes val labelRes: Int) {
     All(R.string.filter_all),
     Warning(R.string.filter_warning),
     Expired(R.string.filter_expired),
-    LongTerm(R.string.filter_long_term),
 }
 
 private fun Context.preferredLocale(): Locale =
@@ -129,16 +135,47 @@ private fun LocalDate.formatForLocale(context: Context): String =
 
 @Composable
 fun ESimKeeperApp(viewModel: MainViewModel) {
+    val context = LocalContext.current
     val cards by viewModel.cards.collectAsStateWithLifecycle()
+    val sortOrder by viewModel.sortOrder.collectAsStateWithLifecycle()
+    val backupNotice = viewModel.backupNotice
     val colorScheme = MaterialTheme.colorScheme
     var today by remember { mutableStateOf(LocalDate.now()) }
     var selectedFilter by remember { mutableStateOf(CardFilter.All) }
     var showDonationDialog by remember { mutableStateOf(false) }
+    val listState = rememberLazyListState()
+    val exportBackupLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json"),
+    ) { uri ->
+        uri?.let { viewModel.exportBackup(it) }
+    }
+    val importBackupLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        uri?.let { viewModel.importBackup(it) }
+    }
 
     LaunchedEffect(Unit) {
         while (true) {
             delay(60_000)
             today = LocalDate.now()
+        }
+    }
+
+    // When the sort order changes the list reorders; LazyColumn's key-based
+    // position anchoring would otherwise keep the previously-top card in view
+    // and could fling the list to the bottom. Snap back to the top instead so
+    // the user always sees the start of the freshly sorted list.
+    LaunchedEffect(sortOrder) {
+        listState.scrollToItem(0)
+    }
+
+    LaunchedEffect(backupNotice) {
+        backupNotice?.let { notice ->
+            val message = notice.cardCount?.let { context.getString(notice.messageRes, it) }
+                ?: context.getString(notice.messageRes)
+            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+            viewModel.clearBackupNotice()
         }
     }
 
@@ -158,7 +195,6 @@ fun ESimKeeperApp(viewModel: MainViewModel) {
                 CardFilter.All -> true
                 CardFilter.Warning -> status.isWarning
                 CardFilter.Expired -> status.isExpired
-                CardFilter.LongTerm -> card.cycleDays != null
             }
             matchesSearch && matchesFilter
         }
@@ -188,8 +224,18 @@ fun ESimKeeperApp(viewModel: MainViewModel) {
             HomeHeader(
                 cardCount = cards.size,
                 isDarkMode = viewModel.isDarkMode,
+                sortOrder = sortOrder,
                 onToggleTheme = viewModel::toggleDarkMode,
                 onOpenDonation = { showDonationDialog = true },
+                onSelectSortOrder = viewModel::setSortOrder,
+                onExportBackup = {
+                    exportBackupLauncher.launch(
+                        context.getString(R.string.backup_file_name, LocalDate.now().toString()),
+                    )
+                },
+                onImportBackup = {
+                    importBackupLauncher.launch(arrayOf("application/json"))
+                },
             )
             SearchField(
                 value = viewModel.searchQuery,
@@ -215,6 +261,7 @@ fun ESimKeeperApp(viewModel: MainViewModel) {
                 EmptyState(hasCards = cards.isNotEmpty(), modifier = Modifier.weight(1f))
             } else {
                 LazyColumn(
+                    state = listState,
                     modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(14.dp),
                     contentPadding = PaddingValues(
@@ -228,6 +275,7 @@ fun ESimKeeperApp(viewModel: MainViewModel) {
                             onEdit = { viewModel.openEdit(card) },
                             onDelete = { viewModel.deleteCard(card) },
                             onRenew = { viewModel.renewCard(card, today) },
+                            onSaveTariff = { tariff -> viewModel.updateTariff(card, tariff) },
                         )
                     }
                 }
@@ -252,9 +300,15 @@ fun ESimKeeperApp(viewModel: MainViewModel) {
 private fun HomeHeader(
     cardCount: Int,
     isDarkMode: Boolean,
+    sortOrder: CardSortOrder,
     onToggleTheme: () -> Unit,
     onOpenDonation: () -> Unit,
+    onSelectSortOrder: (CardSortOrder) -> Unit,
+    onExportBackup: () -> Unit,
+    onImportBackup: () -> Unit,
 ) {
+    var showSortMenu by remember { mutableStateOf(false) }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -279,20 +333,77 @@ private fun HomeHeader(
             )
         }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            GlassSurface(
-                modifier = Modifier.size(46.dp),
-                shape = CircleShape,
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .clickable(onClick = onOpenDonation),
-                    contentAlignment = Alignment.Center,
+            Box {
+                GlassSurface(
+                    modifier = Modifier.size(46.dp),
+                    shape = CircleShape,
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Favorite,
-                        contentDescription = null,
-                        tint = KeeperRed,
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clickable { showSortMenu = true },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.MoreVert,
+                            contentDescription = stringResource(R.string.home_more_options_content_description),
+                            tint = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                }
+                DropdownMenu(
+                    expanded = showSortMenu,
+                    onDismissRequest = { showSortMenu = false },
+                ) {
+                    CardSortOrder.entries.forEach { order ->
+                        DropdownMenuItem(
+                            text = { Text(stringResource(order.labelRes())) },
+                            leadingIcon = {
+                                if (order == sortOrder) {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = null,
+                                        tint = KeeperBlue,
+                                    )
+                                }
+                            },
+                            onClick = {
+                                onSelectSortOrder(order)
+                                showSortMenu = false
+                            },
+                        )
+                    }
+                    HorizontalDivider()
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.backup_export_action)) },
+                        leadingIcon = {
+                            Icon(Icons.Default.FileDownload, contentDescription = null)
+                        },
+                        onClick = {
+                            onExportBackup()
+                            showSortMenu = false
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.backup_import_action)) },
+                        leadingIcon = {
+                            Icon(Icons.Default.FileUpload, contentDescription = null)
+                        },
+                        onClick = {
+                            onImportBackup()
+                            showSortMenu = false
+                        },
+                    )
+                    HorizontalDivider()
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.menu_donation)) },
+                        leadingIcon = {
+                            Icon(Icons.Default.Favorite, contentDescription = null, tint = KeeperRed)
+                        },
+                        onClick = {
+                            onOpenDonation()
+                            showSortMenu = false
+                        },
                     )
                 }
             }
@@ -316,6 +427,14 @@ private fun HomeHeader(
         }
     }
 }
+
+@StringRes
+private fun CardSortOrder.labelRes(): Int =
+    when (this) {
+        CardSortOrder.ExpiryDate -> R.string.sort_by_expiry_date
+        CardSortOrder.CreatedAt -> R.string.sort_by_created_at
+        CardSortOrder.Name -> R.string.sort_by_name
+    }
 
 @Composable
 private fun FilterBar(
@@ -490,11 +609,17 @@ private fun ESimCardItem(
     onEdit: () -> Unit,
     onDelete: () -> Unit,
     onRenew: () -> Unit,
+    onSaveTariff: (Tariff) -> Unit,
 ) {
     val clipboard = LocalClipboardManager.current
     val context = LocalContext.current
     var menuExpanded by remember { mutableStateOf(false) }
-    val status = ExpiryCalculator.status(card.startDate, card.expiryDate, today)
+    var showTariff by remember { mutableStateOf(false) }
+    // Cache the expiry computation so unrelated recompositions (e.g. opening the
+    // charges popup) don't recompute it on every frame while scrolling.
+    val status = remember(card.startDate, card.expiryDate, today) {
+        ExpiryCalculator.status(card.startDate, card.expiryDate, today)
+    }
     val stateColor = when {
         status.isExpired || status.isWarning -> KeeperRed
         else -> KeeperGreen
@@ -515,30 +640,13 @@ private fun ESimCardItem(
                 Row(verticalAlignment = Alignment.Top) {
                     Text(card.flagEmoji, fontSize = 34.sp, modifier = Modifier.width(52.dp))
                     Column(modifier = Modifier.weight(1f)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = card.name,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                fontSize = 20.sp,
-                                fontWeight = FontWeight.Bold,
-                            )
-                            if (card.cycleDays != null) {
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Surface(
-                                    shape = RoundedCornerShape(999.dp),
-                                    color = KeeperBlue.copy(alpha = 0.14f),
-                                ) {
-                                    Text(
-                                        text = stringResource(R.string.long_term_badge),
-                                        color = KeeperBlue,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                                    )
-                                }
-                            }
-                        }
+                        Text(
+                            text = card.name,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
                         Spacer(modifier = Modifier.height(5.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
@@ -549,7 +657,7 @@ private fun ESimCardItem(
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "${card.expiryDate.formatForLocale(context)} · ${remainingText(context, status)}",
+                                text = remainingText(context, status),
                                 color = stateColor,
                                 fontSize = 14.sp,
                                 maxLines = 1,
@@ -557,6 +665,8 @@ private fun ESimCardItem(
                             )
                         }
                     }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    ChargesButton(onClick = { showTariff = true })
                 }
 
                 Spacer(modifier = Modifier.height(12.dp))
@@ -568,6 +678,11 @@ private fun ESimCardItem(
                         .clip(RoundedCornerShape(999.dp)),
                     color = stateColor,
                     trackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
+                    // Material3 1.3 adds a trailing stop dot and a gap by default,
+                    // which makes the bar look broken/interrupted. Disable both so
+                    // the progress fill stays continuous.
+                    gapSize = 0.dp,
+                    drawStopIndicator = {},
                 )
                 Spacer(modifier = Modifier.height(14.dp))
 
@@ -682,6 +797,222 @@ private fun ESimCardItem(
             )
         }
     }
+
+    if (showTariff) {
+        TariffDialog(
+            initial = card.tariff,
+            onDismiss = { showTariff = false },
+            onSave = { tariff ->
+                onSaveTariff(tariff)
+                showTariff = false
+            },
+        )
+    }
+}
+
+@Composable
+private fun ChargesButton(onClick: () -> Unit) {
+    Surface(
+        shape = RoundedCornerShape(999.dp),
+        color = KeeperBlue.copy(alpha = 0.12f),
+        modifier = Modifier.clickable(onClick = onClick),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = Icons.Default.Payments,
+                contentDescription = null,
+                tint = KeeperBlue,
+                modifier = Modifier.size(15.dp),
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(
+                text = stringResource(R.string.charges_action),
+                color = KeeperBlue,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+    }
+}
+
+@Composable
+private fun TariffDialog(
+    initial: Tariff,
+    onDismiss: () -> Unit,
+    onSave: (Tariff) -> Unit,
+) {
+    var outgoingCall by remember { mutableStateOf(initial.outgoingCall) }
+    var incomingCall by remember { mutableStateOf(initial.incomingCall) }
+    var outgoingSms by remember { mutableStateOf(initial.outgoingSms) }
+    var incomingSms by remember { mutableStateOf(initial.incomingSms) }
+    var dataTraffic by remember { mutableStateOf(initial.dataTraffic) }
+
+    // Built-in billing presets. Fully offline / hard-coded (the app never
+    // requests INTERNET). Rate values come from localized string resources so
+    // they read correctly in both Chinese and English.
+    val chinaPresets = listOf(
+        "CTExcel" to Tariff(
+            outgoingCall = stringResource(R.string.preset_ctexcel_outgoing_call),
+            incomingCall = stringResource(R.string.preset_ctexcel_incoming_call),
+            outgoingSms = stringResource(R.string.preset_ctexcel_outgoing_sms),
+            incomingSms = stringResource(R.string.preset_ctexcel_incoming_sms),
+            dataTraffic = stringResource(R.string.preset_ctexcel_data),
+        ),
+        "giffgaff" to Tariff(
+            outgoingCall = stringResource(R.string.preset_giffgaff_outgoing_call),
+            incomingCall = stringResource(R.string.preset_giffgaff_incoming_call),
+            outgoingSms = stringResource(R.string.preset_giffgaff_outgoing_sms),
+            incomingSms = stringResource(R.string.preset_giffgaff_incoming_sms),
+            dataTraffic = stringResource(R.string.preset_giffgaff_data),
+        ),
+    )
+    var presetMenuOpen by remember { mutableStateOf(false) }
+    var presetCountryChosen by remember { mutableStateOf(false) }
+
+    fun applyPreset(preset: Tariff) {
+        outgoingCall = preset.outgoingCall
+        incomingCall = preset.incomingCall
+        outgoingSms = preset.outgoingSms
+        incomingSms = preset.incomingSms
+        dataTraffic = preset.dataTraffic
+        presetMenuOpen = false
+        presetCountryChosen = false
+    }
+
+    Dialog(onDismissRequest = onDismiss) {
+        GlassSurface(
+            shape = RoundedCornerShape(24.dp),
+            contentPadding = PaddingValues(20.dp),
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = stringResource(R.string.charges_title),
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Box {
+                        TextButton(
+                            onClick = {
+                                presetCountryChosen = false
+                                presetMenuOpen = true
+                            },
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.FileDownload,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(stringResource(R.string.charges_import_preset), fontSize = 13.sp)
+                        }
+                        DropdownMenu(
+                            expanded = presetMenuOpen,
+                            onDismissRequest = {
+                                presetMenuOpen = false
+                                presetCountryChosen = false
+                            },
+                        ) {
+                            if (!presetCountryChosen) {
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.preset_country_china)) },
+                                    onClick = { presetCountryChosen = true },
+                                )
+                            } else {
+                                chinaPresets.forEach { (name, preset) ->
+                                    DropdownMenuItem(
+                                        text = { Text(name) },
+                                        onClick = { applyPreset(preset) },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        text = stringResource(R.string.charges_column_item),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 12.sp,
+                        modifier = Modifier.width(96.dp),
+                    )
+                    Text(
+                        text = stringResource(R.string.charges_column_rate),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 12.sp,
+                    )
+                }
+                TariffRow(stringResource(R.string.charges_item_outgoing_call), outgoingCall) { outgoingCall = it }
+                TariffRow(stringResource(R.string.charges_item_incoming_call), incomingCall) { incomingCall = it }
+                TariffRow(stringResource(R.string.charges_item_outgoing_sms), outgoingSms) { outgoingSms = it }
+                TariffRow(stringResource(R.string.charges_item_incoming_sms), incomingSms) { incomingSms = it }
+                TariffRow(stringResource(R.string.charges_item_data), dataTraffic) { dataTraffic = it }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    TextButton(onClick = onDismiss) {
+                        Text(stringResource(R.string.cancel))
+                    }
+                    TextButton(
+                        onClick = {
+                            onSave(
+                                Tariff(
+                                    outgoingCall = outgoingCall.trim(),
+                                    incomingCall = incomingCall.trim(),
+                                    outgoingSms = outgoingSms.trim(),
+                                    incomingSms = incomingSms.trim(),
+                                    dataTraffic = dataTraffic.trim(),
+                                ),
+                            )
+                        },
+                    ) {
+                        Text(stringResource(R.string.save))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TariffRow(label: String, value: String, onValueChange: (String) -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = label,
+            fontSize = 14.sp,
+            modifier = Modifier.width(96.dp),
+        )
+        OutlinedTextField(
+            value = value,
+            onValueChange = onValueChange,
+            modifier = Modifier.weight(1f),
+            singleLine = true,
+            placeholder = {
+                Text(stringResource(R.string.charges_rate_placeholder), fontSize = 12.sp)
+            },
+            shape = RoundedCornerShape(14.dp),
+            colors = TextFieldDefaults.colors(
+                focusedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.36f),
+                unfocusedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.22f),
+                disabledContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.22f),
+                focusedIndicatorColor = Color.Transparent,
+                unfocusedIndicatorColor = Color.Transparent,
+                focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+            ),
+        )
+    }
 }
 
 private fun remainingText(context: Context, status: ExpiryStatus): String {
@@ -761,7 +1092,10 @@ private fun ESimEditorDialog(
         )
     }
     var startDate by remember(card?.id) { mutableStateOf(card?.startDate ?: today) }
-    var useCycle by remember(card?.id) { mutableStateOf(card?.cycleDays != null) }
+    // New cards default to the "by cycle" rule. Existing cards keep whatever
+    // rule they were saved with (cycleDays == null means a fixed expiry date),
+    // so old data stays compatible.
+    var useCycle by remember(card?.id) { mutableStateOf(card?.cycleDays != null || card == null) }
     var cycleDaysText by remember(card?.id) { mutableStateOf(card?.cycleDays?.toString() ?: "30") }
     var expiryDate by remember(card?.id) {
         mutableStateOf(
@@ -785,7 +1119,13 @@ private fun ESimEditorDialog(
         if (info.phoneNumber.isNotBlank()) {
             phone = info.phoneNumber
         }
-        Countries.findByIso(info.countryIso)?.let { selectedCountry = it }
+        // Trust the phone number's dialing code first (carrier ISO is unreliable
+        // for global eSIMs, e.g. a US +1 SIM reported as HK), then fall back to
+        // the SIM's reported country ISO.
+        val detectedCountry = info.phoneNumber.takeIf { it.isNotBlank() }
+            ?.let { Countries.findByPhoneNumber(it) }
+            ?: Countries.findByIso(info.countryIso)
+        detectedCountry?.let { selectedCountry = it }
         importMessage = if (info.phoneNumber.isBlank()) {
             context.getString(R.string.import_read_with_missing_phone, title)
         } else {

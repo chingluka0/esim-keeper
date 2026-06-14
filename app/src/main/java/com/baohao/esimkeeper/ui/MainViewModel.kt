@@ -1,7 +1,8 @@
 package com.baohao.esimkeeper.ui
 
 import android.app.Application
-import android.content.Context
+import android.net.Uri
+import androidx.annotation.StringRes
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -9,16 +10,31 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.baohao.esimkeeper.R
 import com.baohao.esimkeeper.data.AppDatabase
+import com.baohao.esimkeeper.data.CardSortOrder
+import com.baohao.esimkeeper.data.CardSorter
 import com.baohao.esimkeeper.data.CountryOption
 import com.baohao.esimkeeper.data.ESimCard
 import com.baohao.esimkeeper.data.ESimRepository
+import com.baohao.esimkeeper.data.SettingsRepository
+import com.baohao.esimkeeper.data.Tariff
+import com.baohao.esimkeeper.data.backup.CardBackupJson
 import com.baohao.esimkeeper.domain.ExpiryCalculator
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.LocalDate
+import java.nio.charset.StandardCharsets
+
+data class BackupNotice(
+    @StringRes val messageRes: Int,
+    val cardCount: Int? = null,
+)
 
 data class CardEditorInput(
     val name: String,
@@ -33,10 +49,15 @@ data class CardEditorInput(
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
-    private val preferences = application.getSharedPreferences("esim_hub_preferences", Context.MODE_PRIVATE)
     private val repository = ESimRepository(AppDatabase.get(application).eSimCardDao())
+    private val settingsRepository = SettingsRepository(application)
+    private val _sortOrder = MutableStateFlow(CardSortOrder.default)
 
-    val cards: StateFlow<List<ESimCard>> = repository.cards.stateIn(
+    val sortOrder: StateFlow<CardSortOrder> = _sortOrder
+
+    val cards: StateFlow<List<ESimCard>> = combine(repository.cards, _sortOrder) { cards, sortOrder ->
+        CardSorter.sort(cards, sortOrder)
+    }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),
         initialValue = emptyList(),
@@ -51,15 +72,80 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     var isAdding by mutableStateOf(false)
         private set
 
-    var isDarkMode by mutableStateOf(preferences.getBoolean(KEY_DARK_MODE, false))
+    var isDarkMode by mutableStateOf(false)
+        private set
+
+    var backupNotice by mutableStateOf<BackupNotice?>(null)
         private set
 
     val isEditorOpen: Boolean
         get() = isAdding || editorTarget != null
 
+    init {
+        viewModelScope.launch {
+            settingsRepository.settings.collect { settings ->
+                isDarkMode = settings.isDarkMode
+                _sortOrder.value = settings.sortOrder
+            }
+        }
+    }
+
     fun toggleDarkMode() {
-        isDarkMode = !isDarkMode
-        preferences.edit().putBoolean(KEY_DARK_MODE, isDarkMode).apply()
+        viewModelScope.launch {
+            settingsRepository.setDarkMode(!isDarkMode)
+        }
+    }
+
+    fun setSortOrder(order: CardSortOrder) {
+        viewModelScope.launch {
+            settingsRepository.setSortOrder(order)
+        }
+    }
+
+    fun exportBackup(uri: Uri) {
+        val cardsToExport = cards.value
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val json = CardBackupJson.encode(cardsToExport, Instant.now())
+                    getApplication<Application>().contentResolver.openOutputStream(uri)?.use { output ->
+                        output.write(json.toByteArray(StandardCharsets.UTF_8))
+                    } ?: error("Unable to open backup destination")
+                    cardsToExport.size
+                }
+            }
+
+            backupNotice = result.fold(
+                onSuccess = { BackupNotice(R.string.backup_export_success, it) },
+                onFailure = { BackupNotice(R.string.backup_export_failure) },
+            )
+        }
+    }
+
+    fun importBackup(uri: Uri) {
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val json = getApplication<Application>().contentResolver.openInputStream(uri)?.use { input ->
+                        input.bufferedReader(StandardCharsets.UTF_8).readText()
+                    } ?: error("Unable to open backup source")
+                    val importedCards = CardBackupJson.decodeCards(json, Instant.now()).getOrThrow()
+                    if (importedCards.isNotEmpty()) {
+                        repository.importAsNewCards(importedCards)
+                    }
+                    importedCards.size
+                }
+            }
+
+            backupNotice = result.fold(
+                onSuccess = { BackupNotice(R.string.backup_import_success, it) },
+                onFailure = { BackupNotice(R.string.backup_import_failure) },
+            )
+        }
+    }
+
+    fun clearBackupNotice() {
+        backupNotice = null
     }
 
     fun updateSearchQuery(query: String) {
@@ -103,11 +189,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             reminderDaysBefore = input.reminderDaysBefore,
             createdAt = existing?.createdAt ?: now,
             updatedAt = now,
+            // Preserve any saved number-charges when editing other fields.
+            tariff = existing?.tariff ?: Tariff.EMPTY,
         )
 
         viewModelScope.launch {
             repository.save(card)
             closeEditor()
+        }
+    }
+
+    fun updateTariff(card: ESimCard, tariff: Tariff) {
+        viewModelScope.launch {
+            repository.save(card.copy(tariff = tariff, updatedAt = Instant.now()))
         }
     }
 
@@ -129,9 +223,5 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 ),
             )
         }
-    }
-
-    companion object {
-        private const val KEY_DARK_MODE = "dark_mode"
     }
 }

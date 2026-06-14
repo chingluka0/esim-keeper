@@ -10,7 +10,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [ESimCard::class],
-    version = 2,
+    version = 3,
     exportSchema = false,
 )
 @TypeConverters(DateConverters::class)
@@ -28,7 +28,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "esim_keeper.db",
                 )
-                    .addMigrations(MIGRATION_1_2)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                     .build()
                     .also { instance = it }
             }
@@ -36,6 +36,18 @@ abstract class AppDatabase : RoomDatabase() {
         private val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE esim_cards ADD COLUMN reminderDaysBefore INTEGER")
+            }
+        }
+
+        // v3: add the embedded per-card "number charges" (tariff_*) columns.
+        // Existing rows default to empty strings so no data is lost.
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE esim_cards ADD COLUMN tariff_outgoingCall TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE esim_cards ADD COLUMN tariff_incomingCall TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE esim_cards ADD COLUMN tariff_outgoingSms TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE esim_cards ADD COLUMN tariff_incomingSms TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE esim_cards ADD COLUMN tariff_dataTraffic TEXT NOT NULL DEFAULT ''")
             }
         }
     }
