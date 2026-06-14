@@ -59,6 +59,10 @@ aapt dump permissions app/build/outputs/apk/debug/app-debug.apk
 
 Expected permissions are limited to phone-state import permissions and Android's generated app-internal receiver permission. There should be no `android.permission.INTERNET`.
 
+## Acknowledgements
+
+Thanks to fireflies1145 for contributing the PR that helped shape the card sorting, backup and restore, DataStore settings, and Android dependency upgrade work.
+
 ## Disclaimer
 
 Inspired by SIMHUB. This app is an independent project and is not official, affiliated with, endorsed by, or sponsored by SIMHUB.
