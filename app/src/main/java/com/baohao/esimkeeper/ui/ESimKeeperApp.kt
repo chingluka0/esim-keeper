@@ -46,6 +46,8 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Phone
@@ -131,17 +133,38 @@ private fun LocalDate.formatForLocale(context: Context): String =
 
 @Composable
 fun ESimKeeperApp(viewModel: MainViewModel) {
+    val context = LocalContext.current
     val cards by viewModel.cards.collectAsStateWithLifecycle()
     val sortOrder by viewModel.sortOrder.collectAsStateWithLifecycle()
+    val backupNotice = viewModel.backupNotice
     val colorScheme = MaterialTheme.colorScheme
     var today by remember { mutableStateOf(LocalDate.now()) }
     var selectedFilter by remember { mutableStateOf(CardFilter.All) }
     var showDonationDialog by remember { mutableStateOf(false) }
+    val exportBackupLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json"),
+    ) { uri ->
+        uri?.let { viewModel.exportBackup(it) }
+    }
+    val importBackupLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        uri?.let { viewModel.importBackup(it) }
+    }
 
     LaunchedEffect(Unit) {
         while (true) {
             delay(60_000)
             today = LocalDate.now()
+        }
+    }
+
+    LaunchedEffect(backupNotice) {
+        backupNotice?.let { notice ->
+            val message = notice.cardCount?.let { context.getString(notice.messageRes, it) }
+                ?: context.getString(notice.messageRes)
+            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+            viewModel.clearBackupNotice()
         }
     }
 
@@ -195,6 +218,14 @@ fun ESimKeeperApp(viewModel: MainViewModel) {
                 onToggleTheme = viewModel::toggleDarkMode,
                 onOpenDonation = { showDonationDialog = true },
                 onSelectSortOrder = viewModel::setSortOrder,
+                onExportBackup = {
+                    exportBackupLauncher.launch(
+                        context.getString(R.string.backup_file_name, LocalDate.now().toString()),
+                    )
+                },
+                onImportBackup = {
+                    importBackupLauncher.launch(arrayOf("application/json"))
+                },
             )
             SearchField(
                 value = viewModel.searchQuery,
@@ -261,6 +292,8 @@ private fun HomeHeader(
     onToggleTheme: () -> Unit,
     onOpenDonation: () -> Unit,
     onSelectSortOrder: (CardSortOrder) -> Unit,
+    onExportBackup: () -> Unit,
+    onImportBackup: () -> Unit,
 ) {
     var showSortMenu by remember { mutableStateOf(false) }
 
@@ -301,7 +334,7 @@ private fun HomeHeader(
                     ) {
                         Icon(
                             imageVector = Icons.Default.MoreVert,
-                            contentDescription = stringResource(R.string.sort_menu_content_description),
+                            contentDescription = stringResource(R.string.home_more_options_content_description),
                             tint = MaterialTheme.colorScheme.onSurface,
                         )
                     }
@@ -328,6 +361,27 @@ private fun HomeHeader(
                             },
                         )
                     }
+                    HorizontalDivider()
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.backup_export_action)) },
+                        leadingIcon = {
+                            Icon(Icons.Default.FileDownload, contentDescription = null)
+                        },
+                        onClick = {
+                            onExportBackup()
+                            showSortMenu = false
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.backup_import_action)) },
+                        leadingIcon = {
+                            Icon(Icons.Default.FileUpload, contentDescription = null)
+                        },
+                        onClick = {
+                            onImportBackup()
+                            showSortMenu = false
+                        },
+                    )
                 }
             }
             GlassSurface(

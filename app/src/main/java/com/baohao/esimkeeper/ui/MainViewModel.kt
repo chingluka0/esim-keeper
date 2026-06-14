@@ -2,6 +2,8 @@ package com.baohao.esimkeeper.ui
 
 import android.app.Application
 import android.content.Context
+import android.net.Uri
+import androidx.annotation.StringRes
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -14,15 +16,24 @@ import com.baohao.esimkeeper.data.CardSorter
 import com.baohao.esimkeeper.data.CountryOption
 import com.baohao.esimkeeper.data.ESimCard
 import com.baohao.esimkeeper.data.ESimRepository
+import com.baohao.esimkeeper.data.backup.CardBackupJson
 import com.baohao.esimkeeper.domain.ExpiryCalculator
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.LocalDate
+import java.nio.charset.StandardCharsets
+
+data class BackupNotice(
+    @StringRes val messageRes: Int,
+    val cardCount: Int? = null,
+)
 
 data class CardEditorInput(
     val name: String,
@@ -65,6 +76,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     var isDarkMode by mutableStateOf(preferences.getBoolean(KEY_DARK_MODE, false))
         private set
 
+    var backupNotice by mutableStateOf<BackupNotice?>(null)
+        private set
+
     val isEditorOpen: Boolean
         get() = isAdding || editorTarget != null
 
@@ -76,6 +90,52 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setSortOrder(order: CardSortOrder) {
         _sortOrder.value = order
         preferences.edit().putString(KEY_SORT_ORDER, order.preferenceValue).apply()
+    }
+
+    fun exportBackup(uri: Uri) {
+        val cardsToExport = cards.value
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val json = CardBackupJson.encode(cardsToExport, Instant.now())
+                    getApplication<Application>().contentResolver.openOutputStream(uri)?.use { output ->
+                        output.write(json.toByteArray(StandardCharsets.UTF_8))
+                    } ?: error("Unable to open backup destination")
+                    cardsToExport.size
+                }
+            }
+
+            backupNotice = result.fold(
+                onSuccess = { BackupNotice(R.string.backup_export_success, it) },
+                onFailure = { BackupNotice(R.string.backup_export_failure) },
+            )
+        }
+    }
+
+    fun importBackup(uri: Uri) {
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val json = getApplication<Application>().contentResolver.openInputStream(uri)?.use { input ->
+                        input.bufferedReader(StandardCharsets.UTF_8).readText()
+                    } ?: error("Unable to open backup source")
+                    val importedCards = CardBackupJson.decodeCards(json, Instant.now()).getOrThrow()
+                    if (importedCards.isNotEmpty()) {
+                        repository.importAsNewCards(importedCards)
+                    }
+                    importedCards.size
+                }
+            }
+
+            backupNotice = result.fold(
+                onSuccess = { BackupNotice(R.string.backup_import_success, it) },
+                onFailure = { BackupNotice(R.string.backup_import_failure) },
+            )
+        }
+    }
+
+    fun clearBackupNotice() {
+        backupNotice = null
     }
 
     fun updateSearchQuery(query: String) {
